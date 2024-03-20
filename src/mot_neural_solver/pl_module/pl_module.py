@@ -14,11 +14,14 @@ from torch.nn import functional as F
 import pytorch_lightning as pl
 
 from mot_neural_solver.data.mot_graph_dataset import MOTGraphDataset
+# from mot_neural_solver.models.mpn2 import MOTMPNet
 from mot_neural_solver.models.mpn import MOTMPNet
+
 from mot_neural_solver.models.resnet import resnet50_fc256, load_pretrained_weights
 from mot_neural_solver.path_cfg import OUTPUT_PATH
 from mot_neural_solver.utils.evaluation import compute_perform_metrics
 from mot_neural_solver.tracker.mpn_tracker import MPNTracker
+TRACKING_OUT_COLS_CUSTOM = ['frame', 'ped_id', 'conf', 'bb_left', 'bb_top', 'bb_width', 'bb_height']
 
 class MOTNeuralSolver(pl.LightningModule):
     """
@@ -29,20 +32,22 @@ class MOTNeuralSolver(pl.LightningModule):
     """
     def __init__(self, hparams):
         super().__init__()
-
-        self.hparams = hparams
+        self.save_hyperparameters()
+        self.h1params = hparams
         self.model, self.cnn_model = self.load_model()
+        self.validation_step_outputs = []     
+        self.train_step_outputs=[]   
     
     def forward(self, x):
         self.model(x)
 
     def load_model(self):
-        cnn_arch = self.hparams['graph_model_params']['cnn_params']['arch']
-        model =  MOTMPNet(self.hparams['graph_model_params']).cuda()
+        cnn_arch = self.h1params['graph_model_params']['cnn_params']['arch']
+        model =  MOTMPNet(self.h1params['graph_model_params']).cuda()
 
         cnn_model = resnet50_fc256(10, loss='xent', pretrained=True).cuda()
         load_pretrained_weights(cnn_model,
-                                osp.join(OUTPUT_PATH, self.hparams['graph_model_params']['cnn_params']['model_weights_path'][cnn_arch]))
+                                osp.join(OUTPUT_PATH, self.h1params['graph_model_params']['cnn_params']['model_weights_path'][cnn_arch]))
         cnn_model.return_embeddings = True
 
         return model, cnn_model
@@ -50,17 +55,17 @@ class MOTNeuralSolver(pl.LightningModule):
     def _get_data(self, mode, return_data_loader = True):
         assert mode in ('train', 'val', 'test')
 
-        dataset = MOTGraphDataset(dataset_params=self.hparams['dataset_params'],
+        dataset = MOTGraphDataset(dataset_params=self.h1params['dataset_params'],
                                   mode=mode,
                                   cnn_model=self.cnn_model,
-                                  splits= self.hparams['data_splits'][mode],
+                                  splits= self.h1params['data_splits'][mode],
                                   logger=None)
 
         if return_data_loader and len(dataset) > 0:
             train_dataloader = DataLoader(dataset,
-                                          batch_size = self.hparams['train_params']['batch_size'],
+                                          batch_size = self.h1params['train_params']['batch_size'],
                                           shuffle = True if mode == 'train' else False,
-                                          num_workers=self.hparams['train_params']['num_workers'])
+                                          num_workers=self.h1params['train_params']['num_workers'])
             return train_dataloader
         
         elif return_data_loader and len(dataset) == 0:
@@ -79,12 +84,12 @@ class MOTNeuralSolver(pl.LightningModule):
         return self._get_data('test', return_data_loader = return_data_loader)
 
     def configure_optimizers(self):
-        optim_class = getattr(optim_module, self.hparams['train_params']['optimizer']['type'])
-        optimizer = optim_class(self.model.parameters(), **self.hparams['train_params']['optimizer']['args'])
+        optim_class = getattr(optim_module, self.h1params['train_params']['optimizer']['type'])
+        optimizer = optim_class(self.model.parameters(), **self.h1params['train_params']['optimizer']['args'])
 
-        if self.hparams['train_params']['lr_scheduler']['type'] is not None:
-            lr_sched_class = getattr(lr_sched_module, self.hparams['train_params']['lr_scheduler']['type'])
-            lr_scheduler = lr_sched_class(optimizer, **self.hparams['train_params']['lr_scheduler']['args'])
+        if self.h1params['train_params']['lr_scheduler']['type'] is not None:
+            lr_sched_class = getattr(lr_sched_module, self.h1params['train_params']['lr_scheduler']['type'])
+            lr_scheduler = lr_sched_class(optimizer, **self.h1params['train_params']['lr_scheduler']['args'])
 
             return [optimizer], [lr_scheduler]
 
@@ -118,7 +123,6 @@ class MOTNeuralSolver(pl.LightningModule):
         loss = self._compute_loss(outputs, batch)
         logs = {**compute_perform_metrics(outputs, batch), **{'loss': loss}}
         log = {key + f'/{train_val}': val for key, val in logs.items()}
-
         if train_val == 'train':
             return {'loss': loss, 'log': log}
 
@@ -126,22 +130,32 @@ class MOTNeuralSolver(pl.LightningModule):
             return log
 
     def training_step(self, batch, batch_idx):
-        return self._train_val_step(batch, batch_idx, 'train')
+        a=self._train_val_step(batch, batch_idx, 'train')
+        self.train_step_outputs.append(a['loss'])
+        
+        return a
 
     def validation_step(self, batch, batch_idx):
+        self.validation_step_outputs.append(self._train_val_step(batch, batch_idx, 'val'))
         return self._train_val_step(batch, batch_idx, 'val')
-
-    def validation_epoch_end(self, outputs):
+    
+    
+    def on_train_epoch_end(self) -> None:
+        with open("losses.txt",'a+') as f:     
+            f.write(str((sum(self.train_step_outputs)/len(self.train_step_outputs)).item())+"\n")
+        return super().on_train_epoch_end()
+    def on_validation_epoch_end(self):
+        outputs=self.validation_step_outputs
         metrics = pd.DataFrame(outputs).mean(axis=0).to_dict()
         metrics = {metric_name: torch.as_tensor(metric) for metric_name, metric in metrics.items()}
         return {'val_loss': metrics['loss/val'], 'log': metrics}
 
-    def track_all_seqs(self, output_files_dir, dataset, use_gt = False, verbose = False):
+    def track_all_seqs(self, output_files_dir, dataset, use_gt = False, verbose = False, save_res=False, save_path=None):
         tracker = MPNTracker(dataset=dataset,
                              graph_model=self.model,
                              use_gt=use_gt,
-                             eval_params=self.hparams['eval_params'],
-                             dataset_params=self.hparams['dataset_params'])
+                             eval_params=self.h1params['eval_params'],
+                             dataset_params=self.h1params['dataset_params'])
 
         constraint_sr = pd.Series(dtype=float)
         for seq_name in dataset.seq_names:
@@ -150,8 +164,9 @@ class MOTNeuralSolver(pl.LightningModule):
                 print("Tracking sequence ", seq_name)
 
             os.makedirs(output_files_dir, exist_ok=True)
-            _, constraint_sr[seq_name] = tracker.track(seq_name, output_path=osp.join(output_files_dir, seq_name + '.txt'))
-
+            res_df, constraint_sr[seq_name] = tracker.track(seq_name, output_path=osp.join(output_files_dir, seq_name + '.txt'))
+            if(save_res):
+                self._save_results_to_file_custom(res_df, save_path)
             if verbose:
                 print("Done! \n")
 
@@ -159,3 +174,28 @@ class MOTNeuralSolver(pl.LightningModule):
         constraint_sr['OVERALL'] = constraint_sr.mean()
 
         return constraint_sr
+
+    def _save_results_to_file_custom(self, seq_df, output_file_path):
+        """
+        Stores the tracking result to a txt file, in MOTChallenge format.
+        """
+        # seq_df['conf'] = 1
+        seq_df['x'] = -1
+        seq_df['y'] = -1
+        seq_df['z'] = -1
+
+        seq_df['bb_left'] += 1  # Indexing is 1-based in the ground truth
+        seq_df['bb_top'] += 1
+
+        final_out = seq_df[TRACKING_OUT_COLS_CUSTOM].sort_values(by=[ 'frame','ped_id'])
+        x1=final_out['bb_left']
+        y1=final_out['bb_top']
+        x2=x1+final_out['bb_width']
+        y2=y1+ final_out['bb_height']
+        
+        final_out['bb_width']=x2
+        final_out['bb_height']=y2
+        final_out=final_out.rename(columns={"frame":"fn", "ped_id":"id", 'bb_left':'x1', 'bb_top':'y1', 'bb_width':'x2', 'bb_height':'y2'})
+        print(final_out)
+        final_out.to_csv(output_file_path, header=False, index=False)
+        final_out.to_pickle(os.path.splitext(output_file_path)[0]+".pkl")

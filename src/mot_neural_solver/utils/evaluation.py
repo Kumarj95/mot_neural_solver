@@ -101,15 +101,16 @@ class MOTMetricsLogger(Callback):
         return mot_metrics_summary
 
     def on_train_start(self, trainer, pl_module):
-        self.available_data = len(trainer.val_dataloaders) > 0 and len(trainer.val_dataloaders[0]) > 0
+        self.available_data = trainer.val_dataloaders is not None and len(trainer.val_dataloaders) > 0 
+        # and len(trainer.val_dataloaders.dataset[0]) > 0
         if self.available_data:
-            self.dataset = trainer.val_dataloaders[0].dataset
+            self.dataset = trainer.val_dataloaders.dataset
             # Determine the path in which MOT results will be stored
             if trainer.logger is not None:
-                save_dir = osp.join(trainer.logger.save_dir, trainer.logger.name, trainer.logger.version )
+                save_dir = osp.join(trainer.logger.save_dir, trainer.logger.name, str(trainer.logger.version) )
 
             else:
-                save_dir = trainer.default_save_path
+                save_dir = trainer.default_root_dir
 
             self.output_files_dir = osp.join(save_dir, 'mot_files')
             self.output_metrics_dir = osp.join(save_dir, 'mot_metrics')
@@ -133,7 +134,6 @@ class MOTMetricsLogger(Callback):
             if self.compute_oracle_results:
                 for metric in pl_module.hparams['eval_params']['mot_metrics_to_norm']:
                     mot_metrics_summary['norm_' + metric] = mot_metrics_summary[metric] / trainer.oracle_metrics[metric]
-
             if pl_module.logger is not None and hasattr(pl_module.logger, 'experiment'):
                 metric_names = pl_module.hparams['eval_params']['mot_metrics_to_log']
                 if pl_module.hparams['eval_params']['log_per_seq_metrics']:

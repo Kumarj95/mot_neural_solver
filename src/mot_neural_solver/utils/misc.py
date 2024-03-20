@@ -64,7 +64,7 @@ class ModelCheckpoint(Callback):
 
     def on_epoch_end(self, trainer, pl_module):
         if trainer.current_epoch + 1 >= self.save_epoch_start and self.save_every_epoch:
-            filepath = osp.join(trainer.default_save_path,'checkpoints', f"epoch_{trainer.current_epoch+1:03}.ckpt")
+            filepath = osp.join(trainer.default_root_dir,'checkpoints', f"epoch_{trainer.current_epoch+1:03}.ckpt")
             os.makedirs(osp.dirname(filepath), exist_ok = True)
             trainer.save_checkpoint(filepath)
             print(f"Saving model at {filepath}")

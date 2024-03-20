@@ -19,7 +19,7 @@ class MOTGraphDataset:
     returned.
     """
     def __init__(self, dataset_params, mode, splits, logger = None, cnn_model = None):
-        assert mode in ('train', 'val', 'test')
+        assert mode in ('train', 'val', 'test','inference')
         self.dataset_params = dataset_params
         self.mode = mode # Can be either 'train', 'val' or 'test'
         self.logger = logger
@@ -52,7 +52,10 @@ class MOTGraphDataset:
         for split_name in splits:
             #seqs_path, seq_list = _SPLITS[split_name]
             # seqs_to_retrieve[osp.join(DATA_PATH, seqs_path)] = seq_list
-            seqs = {osp.join(DATA_PATH, seqs_path): seq_list for seqs_path, seq_list in  _SPLITS[split_name].items()}
+            if self.mode =="inference":
+                seqs={self.dataset_params['seq_path']:[splits[0]]}
+            else:
+                seqs = {osp.join(DATA_PATH, seqs_path): seq_list for seqs_path, seq_list in  _SPLITS[split_name].items()}
             seqs_to_retrieve.update(seqs)
 
 
@@ -86,6 +89,8 @@ class MOTGraphDataset:
                     seq_det_df = seq_det_df[seq_det_df['vis'] > self.dataset_params['gt_training_min_vis']]
 
                 seq_names.append(seq_name)
+                print(seq_det_df)
+                input()
                 seq_info_dicts[seq_name] = seq_det_df.seq_info_dict
                 seq_det_dfs[seq_name] = seq_det_df
 
@@ -95,6 +100,97 @@ class MOTGraphDataset:
 
         else:
             return None, None, []
+    def nms(df):
+        dets_inside = df
+        dets_nms = pd.DataFrame()
+        for fn in np.unique(dets_inside['frame']):
+
+            det = dets_inside[dets_inside['frame'] == fn]
+            # det=det[0:4]
+
+            conf, bboxes = det['conf'].to_numpy(), det[['bb_left', 'bb_top', 'bb_right', 'bb_bot']].to_numpy()
+            boxes=bboxes[np.newaxis, :, :]            
+            x1 = np.maximum(boxes[:, :, 0][:, :, np.newaxis], boxes[:, :, 0])
+            y1 = np.maximum(boxes[:, :, 1][:, :, np.newaxis], boxes[:, :, 1])
+            x2 = np.minimum(boxes[:, :, 2][:, :, np.newaxis], boxes[:, :, 2])
+            y2 = np.minimum(boxes[:, :, 3][:, :, np.newaxis], boxes[:, :, 3])
+            
+            intersection_area = np.maximum(0, x2 - x1) * np.maximum(0, y2 - y1)
+            area_bbox1 = (boxes[:, :, 2] - boxes[:, :, 0]) * (boxes[:, :, 3] - boxes[:, :, 1])
+            area_bbox2 = (boxes[:, :, 2] - boxes[:, :, 0]) * (boxes[:, :, 3] - boxes[:, :, 1])
+            union_area = area_bbox1[:, :, np.newaxis] + area_bbox2 - intersection_area
+            
+            iou_scores = intersection_area / union_area
+
+            ious = np.triu(iou_scores[0])            
+
+            # Only keep those boxes who has certain IoU - Overlapping boxes in the intersecting regions.
+
+            overlapping_pairs = np.where((ious > 0.5) & (ious < 1.0))
+
+            overlapping_pairs = np.hstack((overlapping_pairs[0].reshape(-1, 1), overlapping_pairs[1].reshape(-1, 1)))
+            
+            non_overlapping_pairs = np.where((ious <= 0.5) & (ious > 0.0))
+
+            non_overlapping_pairs = np.hstack((non_overlapping_pairs[0].reshape(-1, 1), non_overlapping_pairs[1].reshape(-1, 1)))
+
+            conf_pairs = np.hstack((conf[overlapping_pairs[:, 0]].reshape(-1, 1), conf[overlapping_pairs[:, 1]].reshape(-1, 1)))
+
+            confs_sort_idxs = np.argsort(-conf_pairs, axis=1)
+
+            keep_indices = overlapping_pairs[np.arange(0, overlapping_pairs.shape[0]), confs_sort_idxs[:, 0]]
+            
+            remove_indices = overlapping_pairs[np.arange(0, overlapping_pairs.shape[0]), confs_sort_idxs[:, 1]]
+
+            keep_indices = np.unique(keep_indices)
+            
+            remove_indices=np.unique(remove_indices)
+            # remove_indices= np.append(remove_indices, np.where(conf<0.9))
+            # remove_indices=np.unique(remove_indices)
+
+            low_confs_pairs = np.hstack((conf[non_overlapping_pairs[:, 0]].reshape(-1, 1), conf[non_overlapping_pairs[:, 1]].reshape(-1, 1)))
+
+            low_confs_sort_idxs = np.argsort(-low_confs_pairs, axis=1)
+
+            keep_indices_low_confs =  non_overlapping_pairs[np.arange(0, non_overlapping_pairs.shape[0]), low_confs_sort_idxs[:, 0]]
+
+            keep_indices_low_confs = np.unique(non_overlapping_pairs)
+
+        
+
+            keep_indices_low_confs = keep_indices_low_confs[np.where(conf[keep_indices_low_confs] > 0.5)]  
+
+            dets_nms = pd.concat([dets_nms,det.iloc[np.delete(np.arange(len(det)), remove_indices)]])
+
+            # dets_nms = pd.concat([dets_nms,det.iloc[keep_indices_low_confs]])
+            
+            # dets_nms = pd.concat([dets_nms, det.iloc[keep_indices]])
+            
+
+            # overlapping_pairs = np.where((ious > 0.5) & (ious < 1.0))
+
+            # overlapping_pairs = np.hstack((overlapping_pairs[0].reshape(-1, 1), overlapping_pairs[1].reshape(-1, 1)))
+
+            # conf_pairs = np.hstack((conf[overlapping_pairs[:, 0]].reshape(-1, 1), conf[overlapping_pairs[:, 1]].reshape(-1, 1)))
+
+            # confs_sort_idxs = np.argsort(-conf_pairs, axis=1)
+
+            # keep_indices = overlapping_pairs[np.arange(0, overlapping_pairs.shape[0]), confs_sort_idxs[:, 0]]
+
+            # keep_indices = np.unique(keep_indices)
+
+            # dets_nms = pd.concat([dets_nms, det.iloc[keep_indices]])
+
+
+        # return dets_inside[~idxs_inside].append(dets_nms)
+
+
+
+        # return dets_inside[~idxs_inside].append(dets_nms, ignore_index=True)
+
+
+        print('regular nms done')
+        return dets_nms
 
     def _compute_seq_step_sizes(self):
         """
