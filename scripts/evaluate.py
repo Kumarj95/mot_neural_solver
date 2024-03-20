@@ -31,10 +31,10 @@ def main(_config, _run):
 
     # Load model from checkpoint and update config entries that may vary from the ones used in training
     model = MOTNeuralSolver.load_from_checkpoint(checkpoint_path=_config['ckpt_path'] if osp.exists(_config['ckpt_path'])  else osp.join(OUTPUT_PATH, _config['ckpt_path']))
-    model.hparams.update({'eval_params':_config['eval_params'],
+    model.h1params.update({'eval_params':_config['eval_params'],
                           'data_splits':_config['data_splits']})
-    model.hparams['dataset_params']['precomputed_embeddings'] = _config['precomputed_embeddings']
-    model.hparams['dataset_params']['img_batch_size'] = _config['dataset_params']['img_batch_size']
+    model.h1params['dataset_params']['precomputed_embeddings'] = _config['precomputed_embeddings']
+    model.h1params['dataset_params']['img_batch_size'] = _config['dataset_params']['img_batch_size']
 
     # Get output MOT results files
     test_dataset = model.test_dataset()
@@ -55,5 +55,6 @@ def main(_config, _run):
             cols = [col for col in mot_metrics_summary.columns if col in _config['eval_params']['mot_metrics_to_log']]
             print("\n" + str(mot_metrics_summary[cols]))
 
-    except:
+    except Exception as e:
+        print(e)
         print("Could not evaluate the given results")

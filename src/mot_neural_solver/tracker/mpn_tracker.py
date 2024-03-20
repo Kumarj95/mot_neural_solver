@@ -17,6 +17,7 @@ from lapsolver import solve_dense
 VIDEO_COLUMNS = ['frame_path', 'frame', 'ped_id', 'bb_left', 'bb_top', 'bb_width', 'bb_height', 'bb_right', 'bb_bot']
 TRACKING_OUT_COLS = ['frame', 'ped_id', 'bb_left', 'bb_top', 'bb_width', 'bb_height', 'conf', 'x', 'y', 'z']
 
+TRACKING_OUT_COLS_CUSTOM = ['frame', 'id', 'conf', 'bb_left', 'bb_top', 'bb_width', 'bb_height']
 
 class MPNTracker:
     """
@@ -131,7 +132,7 @@ class MPNTracker:
         device = torch.device('cuda')
         all_frames = np.array(subseq_graph.frames)
         frame_num_per_node = torch.from_numpy(subseq_graph.graph_df.frame.values).to(device)
-        node_names = torch.arange(subseq_graph.graph_obj.x.shape[0])
+        node_names = torch.arange(subseq_graph.graph_obj.x.shape[0]).to(device)
 
         # Iterate over overlapping windows of (starg_frame, end_frame)
         overall_edge_preds = torch.zeros(subseq_graph.graph_obj.num_edges).to(device)
@@ -143,7 +144,11 @@ class MPNTracker:
             nodes_mask = (start_frame <= frame_num_per_node) & (frame_num_per_node <= end_frame)
             edges_mask = nodes_mask[subseq_graph.graph_obj.edge_index[0]] & nodes_mask[
                 subseq_graph.graph_obj.edge_index[1]]
-
+            # print(subseq_graph.graph_obj.edge_index.is_cuda)
+            # print(edges_mask.is_cuda)
+            # print(node_names.is_cuda)
+            # print(subseq_graph.graph_obj.edge_index.T[edges_mask].T)
+            # input()
             subgraph = Graph(x=subseq_graph.graph_obj.x[nodes_mask],
                              edge_attr=subseq_graph.graph_obj.edge_attr[edges_mask],
                              reid_emb_dists=subseq_graph.graph_obj.reid_emb_dists[edges_mask],
@@ -349,7 +354,7 @@ class MPNTracker:
 
         if output_path is not None:
             self._save_results_to_file(seq_df, output_path)
-
+        
         return seq_df, constr_sr
 
     def _save_results_to_file(self, seq_df, output_file_path):
@@ -365,6 +370,28 @@ class MPNTracker:
         seq_df['bb_top'] += 1
 
         final_out = seq_df[TRACKING_OUT_COLS].sort_values(by=['frame', 'ped_id'])
+        final_out.to_csv(output_file_path, header=False, index=False)
+    def _save_results_to_file_custom(self, seq_df, output_file_path):
+        """
+        Stores the tracking result to a txt file, in MOTChallenge format.
+        """
+        seq_df['conf'] = 1
+        seq_df['x'] = -1
+        seq_df['y'] = -1
+        seq_df['z'] = -1
+
+        seq_df['bb_left'] += 1  # Indexing is 1-based in the ground truth
+        seq_df['bb_top'] += 1
+
+        final_out = seq_df[TRACKING_OUT_COLS_CUSTOM].sort_values(by=['frame', 'id'])
+        x1=final_out['bbox_left']
+        y1=final_out['bbox_top']
+        x2=x1+final_out['bbox_width']
+        y2=y1+ final_out['bbox_height']
+        
+        final_out['bbox_width']=x2
+        final_out['bbox_height']=y2
+        
         final_out.to_csv(output_file_path, header=False, index=False)
 
     ########################################### Not revised below
@@ -512,3 +539,6 @@ class MPNTracker:
         #print("Assert ok")
 
         return final_out
+    
+    def track_custom(self, path_to_detections_df):
+        print(path_to_detections_df)

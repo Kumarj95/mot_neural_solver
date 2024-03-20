@@ -27,6 +27,7 @@ from lapsolver import solve_dense
 
 from mot_neural_solver.data.seq_processing.MOTCha_loader import get_mot_det_df, get_mot_det_df_from_gt
 from mot_neural_solver.data.seq_processing.MOT15_loader import get_mot15_det_df, get_mot15_det_df_from_gt
+from mot_neural_solver.data.seq_processing.Custom_loader import get_custom_det_df
 from mot_neural_solver.utils.iou import iou
 from mot_neural_solver.utils.rgb import BoundingBoxDataset
 
@@ -50,14 +51,18 @@ from torch.utils.data import DataLoader
 _SEQ_TYPE_DETS_DF_LOADER = {'MOT': get_mot_det_df,
                             'MOT_gt': get_mot_det_df_from_gt,
                             'MOT15': get_mot15_det_df,
-                            'MOT15_gt': get_mot15_det_df_from_gt}
+                            'MOT15_gt': get_mot15_det_df_from_gt,
+                            'Custom':get_custom_det_df,
+                            }
+                            # 'Custom_gt':get_custom_gt_df}
 
 # Determines whether boxes are allowed to have some area outside the image (all GT annotations in MOT15 are inside img
 # hence we crop its detections to also be inside it)
 _ENSURE_BOX_IN_FRAME = {'MOT': False,
                         'MOT_gt': False,
                         'MOT15': True,
-                        'MOT15_gt': False}
+                        'MOT15_gt': False,
+                        'Custom':True}
 
 
 # We now map each sequence name to a sequence type in _SEQ_TYPES
@@ -142,7 +147,10 @@ class MOTSeqProcessor:
     def __init__(self, dataset_path, seq_name, dataset_params, cnn_model = None, logger = None):
         self.seq_name = seq_name
         self.dataset_path = dataset_path
-        self.seq_type = _SEQ_TYPES[seq_name]
+        if(seq_name not in _SEQ_TYPES):
+            self.seq_type="Custom"
+        else:
+            self.seq_type = _SEQ_TYPES[seq_name]
 
         self.det_df_loader = _SEQ_TYPE_DETS_DF_LOADER[self.seq_type]
         self.dataset_params = dataset_params
@@ -210,7 +218,6 @@ class MOTSeqProcessor:
 
         self.det_df = DataFrameWSeqInfo(self.det_df)
         self.det_df.seq_info_dict = seq_info_dict
-
         # Some further processing
         if self.seq_type in _ENSURE_BOX_IN_FRAME and _ENSURE_BOX_IN_FRAME[self.seq_type]:
             self._ensure_boxes_in_frame()
@@ -239,7 +246,10 @@ class MOTSeqProcessor:
         """
         processed_dets_path = osp.join(self.det_df.seq_info_dict['seq_path'], 'processed_data', 'det')
         os.makedirs(processed_dets_path, exist_ok = True)
-        det_df_path = osp.join(processed_dets_path, self.det_df.seq_info_dict['det_file_name'] + '.pkl')
+        if(self.seq_type!="Custom"):
+            det_df_path = osp.join(processed_dets_path, self.det_df.seq_info_dict['det_file_name'] + '.pkl')
+        else:
+            det_df_path=self.dataset_params['preprocessed_det_pth']
         self.det_df.to_pickle(det_df_path)
         print(f"Finished processing detections for seq {self.seq_name}. Result was stored at {det_df_path}")
 
@@ -354,13 +364,23 @@ class MOTSeqProcessor:
         result
         """
         # Check if the processed detections file already exists.
-        seq_path = osp.join(self.dataset_path, self.seq_name)
-        det_file_to_use = self.dataset_params['det_file_name'] if not self.seq_name.endswith('GT') else 'gt'
-        seq_det_df_path = osp.join(seq_path, 'processed_data/det', det_file_to_use + '.pkl')
+        if(self.seq_type!="Custom"):
+            seq_path = osp.join(self.dataset_path, self.seq_name)
+            det_file_to_use = self.dataset_params['det_file_name'] if not self.seq_name.endswith('GT') else 'gt'
+            seq_det_df_path = osp.join(seq_path, 'processed_data/det', det_file_to_use + '.pkl')
 
-        # If loading precomputed embeddings, check if embeddings have already been stored (otherwise, we need to process dets again)
-        node_embeds_path = osp.join(seq_path, 'processed_data/embeddings', det_file_to_use, self.dataset_params['node_embeddings_dir'])
-        reid_embeds_path = osp.join(seq_path, 'processed_data/embeddings', det_file_to_use, self.dataset_params['reid_embeddings_dir'])
+            # If loading precomputed embeddings, check if embeddings have already been stored (otherwise, we need to process dets again)
+            node_embeds_path = osp.join(seq_path, 'processed_data/embeddings', det_file_to_use, self.dataset_params['node_embeddings_dir'])
+            reid_embeds_path = osp.join(seq_path, 'processed_data/embeddings', det_file_to_use, self.dataset_params['reid_embeddings_dir'])
+        else:
+            seq_path = self.dataset_params['seq_path']
+            det_file_to_use = self.dataset_params['detection_file_path'] if not self.seq_name.endswith('GT') else 'gt'
+            seq_det_df_path = osp.join(det_file_to_use + 'MPNN.pkl')
+
+            # If loading precomputed embeddings, check if embeddings have already been stored (otherwise, we need to process dets again)
+            node_embeds_path = self.dataset_params['node_embeddings_dir']
+            reid_embeds_path = self.dataset_params['reid_embeddings_dir']
+            
         try:
             num_frames = len(pd.read_pickle(seq_det_df_path)['frame'].unique())
             processed_dets_exist = True

@@ -7,7 +7,7 @@ from mot_neural_solver.utils.misc import make_deterministic, get_run_str_and_sav
 from mot_neural_solver.path_cfg import OUTPUT_PATH
 import os.path as osp
 
-from mot_neural_solver.pl_module.pl_module import MOTNeuralSolver
+from mot_neural_solver.pl_module.pl_module3 import MOTNeuralSolver3 as MOTNeuralSolver
 
 from pytorch_lightning import Trainer
 from pytorch_lightning.loggers import TensorBoardLogger
@@ -17,7 +17,7 @@ from sacred import SETTINGS
 SETTINGS.CONFIG.READ_ONLY_CONFIG=False
 
 ex = Experiment()
-ex.add_config('configs/tracking_cfg.yaml')
+ex.add_config('configs/tracking_cfg_new.yaml')
 ex.add_config({'run_id': 'train_w_default_config',
                'add_date': True,
                'cross_val_split': None})
@@ -62,20 +62,31 @@ def main(_config, _run):
 
     else:
         logger = None
-
     ckpt_callback = ModelCheckpoint(save_epoch_start = _config['train_params']['save_epoch_start'],
                                     save_every_epoch = _config['train_params']['save_every_epoch'])
-
-    trainer = Trainer(gpus=1,
+    
+    # ckpt_callback=
+    trainer = Trainer(devices=1,
                       callbacks=[MOTMetricsLogger(compute_oracle_results = _config['eval_params']['normalize_mot_metrics']), ckpt_callback],
-                      weights_summary = None,
-                      checkpoint_callback=False,
+                    #   weights_summary = None,
+                    #   checkpoint_callback=False,
                       max_epochs=_config['train_params']['num_epochs'],
-                      val_percent_check = _config['eval_params']['val_percent_check'],
+                      val_check_interval = _config['eval_params']['val_percent_check'],
                       check_val_every_n_epoch=_config['eval_params']['check_val_every_n_epoch'],
-                      nb_sanity_val_steps=0,
+                      num_sanity_val_steps=0,
                       logger =logger,
-                      default_save_path=osp.join(OUTPUT_PATH, 'experiments', run_str))
+                      default_root_dir=osp.join(OUTPUT_PATH, 'experiments', run_str)
+                      )
+    # trainer = Trainer(gpus=1,
+    #                   callbacks=[MOTMetricsLogger(compute_oracle_results = _config['eval_params']['normalize_mot_metrics']), ckpt_callback],
+    #                   weights_summary = None,
+    #                   checkpoint_callback=False,
+    #                   max_epochs=_config['train_params']['num_epochs'],
+    #                   val_percent_check = _config['eval_params']['val_percent_check'],
+    #                   check_val_every_n_epoch=_config['eval_params']['check_val_every_n_epoch'],
+    #                   nb_sanity_val_steps=0,
+    #                   logger =logger,
+    #                   default_save_path=osp.join(OUTPUT_PATH, 'experiments', run_str))    
     trainer.fit(model)
 
 

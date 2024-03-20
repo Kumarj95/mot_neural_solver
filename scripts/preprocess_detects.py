@@ -49,7 +49,7 @@ def main(dataset_names,  prepr_w_tracktor, frcnn_prepr_params,  tracktor_params,
         preprocessor = FRCNNPreprocessor(obj_detect, prepr_params)
 
     _log.info(f"Starting  preprocessing of datasets {dataset_names} with {'Tracktor' if prepr_w_tracktor else 'FRCNN'} \n")
-
+    input()
     for dataset_name in dataset_names:
         dataset = Datasets(dataset_name)
         _log.info(f"Preprocessing {len(dataset)} sequences from dataset {dataset_name} \n")
