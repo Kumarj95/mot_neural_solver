@@ -150,12 +150,15 @@ class MOTNeuralSolver(pl.LightningModule):
         metrics = {metric_name: torch.as_tensor(metric) for metric_name, metric in metrics.items()}
         return {'val_loss': metrics['loss/val'], 'log': metrics}
 
-    def track_all_seqs(self, output_files_dir, dataset, use_gt = False, verbose = False, save_res=False, save_path=None):
+    def track_all_seqs(self, output_files_dir, dataset, use_gt = False, verbose = False, save_res=False, save_path=None, edge_idx_pth=None, edge_attr_pth=None):
+
         tracker = MPNTracker(dataset=dataset,
                              graph_model=self.model,
                              use_gt=use_gt,
                              eval_params=self.h1params['eval_params'],
-                             dataset_params=self.h1params['dataset_params'])
+                             dataset_params=self.h1params['dataset_params'],
+                             edge_idx_pth=edge_idx_pth,
+                             edge_attr_path=edge_attr_pth)
 
         constraint_sr = pd.Series(dtype=float)
         for seq_name in dataset.seq_names:

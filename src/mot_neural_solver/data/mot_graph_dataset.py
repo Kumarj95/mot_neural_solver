@@ -31,7 +31,6 @@ class MOTGraphDataset:
 
         # Load all dataframes containing detection information in each sequence of the dataset
         self.seq_det_dfs, self.seq_info_dicts, self.seq_names = self._load_seq_dfs(seqs_to_retrieve)
-
         if self.seq_names:
             # Update each sequence's meatinfo with step sizes
             self._compute_seq_step_sizes()
@@ -90,7 +89,7 @@ class MOTGraphDataset:
 
                 seq_names.append(seq_name)
                 print(seq_det_df)
-                input()
+                # input()
                 seq_info_dicts[seq_name] = seq_det_df.seq_info_dict
                 seq_det_dfs[seq_name] = seq_det_df
 
