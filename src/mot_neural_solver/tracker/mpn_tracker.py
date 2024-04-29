@@ -27,7 +27,7 @@ class MPNTracker:
     """
 
     def __init__(self, dataset, graph_model, use_gt, eval_params=None,
-                 dataset_params=None, logger=None):
+                 dataset_params=None, logger=None, edge_idx_pth=None, edge_attr_path=None):
 
         self.dataset = dataset
         self.use_gt = use_gt
@@ -37,7 +37,8 @@ class MPNTracker:
         self.dataset_params = dataset_params
 
         self.graph_model = graph_model
-
+        self.edge_idx_path=edge_idx_pth
+        self.edge_attr_path=edge_attr_path
         if self.graph_model is not None:
             self.graph_model.eval()
 
@@ -108,9 +109,8 @@ class MPNTracker:
         else:
             with torch.no_grad():
                 pruned_edge_preds = torch.sigmoid(self.graph_model(subgraph)['classified_edges'][-1].view(-1))
-
         edge_preds = torch.zeros(knn_mask.shape[0]).to(pruned_edge_preds.device)
-        edge_preds[knn_mask] = pruned_edge_preds
+        edge_preds[knn_mask] = pruned_edge_preds        
 
         if self.eval_params['set_pruned_edges_to_inactive']:
             return edge_preds, torch.ones_like(knn_mask)
@@ -136,6 +136,7 @@ class MPNTracker:
 
         # Iterate over overlapping windows of (starg_frame, end_frame)
         overall_edge_preds = torch.zeros(subseq_graph.graph_obj.num_edges).to(device)
+        
         overall_num_preds = overall_edge_preds.clone()
         for eval_round, (start_frame, end_frame) in enumerate(zip(all_frames, all_frames[frames_per_graph - 1:])):
             assert ((start_frame <= all_frames) & (all_frames <= end_frame)).sum() == frames_per_graph
@@ -168,9 +169,25 @@ class MPNTracker:
 
         # Average edge predictions over all batches, and over each pair of directed edges
         final_edge_preds = overall_edge_preds / overall_num_preds
+                
         final_edge_preds[torch.isnan(final_edge_preds)] = 0
         subseq_graph.graph_obj.edge_preds = final_edge_preds
+        # print(nodes_mask)
+        # print(nodes_mask.shape)
+        # print(edge_preds[edge_preds>0])
+        # print(edge_preds[edge_preds>0].shape)
+        # print(edge_preds.shape)
+        
         to_undirected_graph(subseq_graph, attrs_to_update=('edge_preds', 'edge_labels'))
+        next_frame_edge_idx=subseq_graph.graph_obj.edge_index[:,(subseq_graph.graph_df.iloc[subseq_graph.graph_obj.edge_index[1,:].cpu().numpy()]['frame'].to_numpy()- subseq_graph.graph_df.iloc[subseq_graph.graph_obj.edge_index[0,:].cpu().numpy()]['frame'].to_numpy())==1]
+        next_frame_edge_attr=subseq_graph.graph_obj.edge_preds[(subseq_graph.graph_df.iloc[subseq_graph.graph_obj.edge_index[1,:].cpu().numpy()]['frame'].to_numpy()- subseq_graph.graph_df.iloc[subseq_graph.graph_obj.edge_index[0,:].cpu().numpy()]['frame'].to_numpy())==1]
+        print(next_frame_edge_idx.shape)
+        print(next_frame_edge_attr.shape)
+        if(self.edge_idx_path is not None and self.edge_attr_path is not None):
+            np.save( self.edge_idx_path,next_frame_edge_idx.cpu().detach().numpy())
+            np.save( self.edge_attr_path, next_frame_edge_attr.cpu().detach().numpy())
+            print(self.edge_idx_path)
+            print(self.edge_attr_path)
         to_lightweight_graph(subseq_graph)
         return subseq_graph
         # print(time() - t)
@@ -327,6 +344,7 @@ class MPNTracker:
             subseq_graph = self._evaluate_graph_in_batches(subseq_graph, frames_per_graph)
 
             # Round predictions and assign IDs to trajectories
+            
             subseq_graph = self._project_graph_model_output(subseq_graph)
             constr_sr += subseq_graph.constr_satisf_rate
             subseq_df = self._assign_ped_ids(subseq_graph)
